@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>CS 1.6</title>
+    <style>
+        * { user-select: none; -webkit-tap-highlight-color: transparent; outline: none; }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #000; }
+        canvas { display: block; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; }
+        
+        #joystick-zone { position: fixed; bottom: 30px; left: 30px; width: 150px; height: 150px; z-index: 100; }
+        #jumpBtn { 
+            position: fixed; bottom: 40px; right: 40px; width: 85px; height: 85px; 
+            background: rgba(255, 0, 0, 0.5); color: white; border: 2px solid #fff; border-radius: 50%; 
+            font-size: 18px; font-weight: bold; z-index: 100; display: flex; justify-content: center; align-items: center;
+        }
+
+        #loading {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; color: #fff; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 1000;
+        }
+    </style>
+</head>
+<body onclick="requestFS()">
+
+    <div id="loading"><h1>CS 1.6</h1><p>LOADING MAP...</p></div>
+    <div id="joystick-zone"></div>
+    <button id="jumpBtn">JUMP</button>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.7.3/nipplejs.min.js"></script>
+
+    <script>
+        let scene, camera, renderer, clock, moveData = { x: 0, y: 0 };
+        let velocity = new THREE.Vector3(), direction = new THREE.Vector3(), canJump = false;
+
+        function requestFS() {
+            let el = document.documentElement;
+            if (el.requestFullscreen) el.requestFullscreen();
+            else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+        }
+
+        init();
+        animate();
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87ceeb);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 30000);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.body.appendChild(renderer.domElement);
+
+            scene.add(new THREE.AmbientLight(0xffffff, 3.5));
+            let light = new THREE.DirectionalLight(0xffffff, 1.5);
+            light.position.set(100, 500, 100);
+            scene.add(light);
+
+            const loader = new THREE.GLTFLoader();
+            loader.load('harita.glb', (gltf) => {
+                const map = gltf.scene;
+                scene.add(map);
+                
+                const box = new THREE.Box3().setFromObject(map);
+                const center = box.getCenter(new THREE.Vector3());
+                map.position.sub(center); 
+                
+                camera.position.set(0, 15, 0); 
+                document.getElementById('loading').style.display = 'none';
+            });
+
+            clock = new THREE.Clock();
+
+            const joy = nipplejs.create({ 
+                zone: document.getElementById('joystick-zone'), 
+                mode: 'static', position: {left: '50%', top: '50%'}, 
+                color: 'white', size: 130 
+            });
+            
+            joy.on('move', (evt, data) => {
+                moveData.x = data.vector.x;
+                moveData.y = data.vector.y;
+            });
+            joy.on('end', () => { moveData.x = 0; moveData.y = 0; });
+
+            document.getElementById('jumpBtn').onclick = (e) => {
+                e.stopPropagation();
+                if(canJump) { velocity.y += 24; canJump = false; }
+            };
+
+            let tx = 0, ty = 0;
+            document.addEventListener('touchstart', (e) => {
+                if(e.touches[0].pageX > window.innerWidth/2) {
+                    tx = e.touches[0].pageX; ty = e.touches[0].pageY;
+                }
+            });
+            document.addEventListener('touchmove', (e) => {
+                if(e.touches[0].pageX > window.innerWidth/2) {
+                    camera.rotation.y -= (e.touches[0].pageX - tx) * 0.008;
+                    camera.rotation.x -= (e.touches[0].pageY - ty) * 0.006;
+                    camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
+                    tx = e.touches[0].pageX; ty = e.touches[0].pageY;
+                }
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            let dt = clock.getDelta();
+            if(dt > 0.1) dt = 0.1;
+
+            velocity.x -= velocity.x * 10 * dt;
+            velocity.z -= velocity.z * 10 * dt;
+            velocity.y -= 58 * dt;
+
+            if (moveData.x || moveData.y) {
+                const rot = camera.rotation.y;
+                const speed = 200 * dt;
+                velocity.z -= (moveData.y * Math.cos(rot) - moveData.x * Math.sin(rot)) * speed;
+                velocity.x -= (moveData.y * Math.sin(rot) + moveData.x * Math.cos(rot)) * speed;
+            }
+
+            camera.position.addScaledVector(velocity, dt);
+            
+            if (camera.position.y < 8) { 
+                camera.position.y = 8; 
+                velocity.y = 0; 
+                canJump = true; 
+            }
+            
+            renderer.render(scene, camera);
+        }
+
+        window.onresize = () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        };
+    </script>
+</body>
+</html>
